@@ -470,7 +470,7 @@ input[type="range"] {
 .compare-divider {
   position: absolute;
   top: 74px;
-  bottom: 88px;
+  bottom: 26px;
   z-index: 3;
   width: 2px;
   pointer-events: none;
@@ -478,7 +478,7 @@ input[type="range"] {
   box-shadow: 0 0 22px rgba(105, 232, 255, 0.46);
 }
 
-.compare-divider span {
+.compare-handle {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -488,33 +488,24 @@ input[type="range"] {
   border-radius: 999px;
   background: rgba(5, 12, 21, 0.76);
   box-shadow: 0 0 24px rgba(105, 232, 255, 0.2);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
   transform: translate(-50%, -50%);
 }
 
-.compare-control {
-  position: absolute;
-  left: 26px;
-  right: 26px;
-  bottom: 22px;
-  z-index: 4;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
-  border: 1px solid rgba(151, 221, 240, 0.15);
-  border-radius: 9px;
-  color: #c7dbe7;
-  background: rgba(4, 11, 19, 0.68);
-  backdrop-filter: blur(16px);
-  font-size: 0.8rem;
-  font-weight: 850;
+.compare-handle:hover,
+.compare-handle:focus-visible {
+  border-color: rgba(105, 232, 255, 0.95);
+  outline: none;
+  background: rgba(8, 25, 39, 0.9);
+  box-shadow: 0 0 0 6px rgba(105, 232, 255, 0.1), 0 0 28px rgba(105, 232, 255, 0.34);
 }
 
 .debug-overlay {
   position: absolute;
   left: 26px;
-  bottom: 82px;
+  bottom: 26px;
   z-index: 4;
   display: grid;
   gap: 4px;
@@ -532,7 +523,7 @@ input[type="range"] {
 .floating-reset {
   position: absolute;
   right: 18px;
-  bottom: 82px;
+  bottom: 26px;
   z-index: 4;
   display: inline-grid;
   place-items: center;
@@ -544,7 +535,7 @@ input[type="range"] {
 .camera-toggle {
   position: absolute;
   right: 66px;
-  bottom: 82px;
+  bottom: 26px;
   z-index: 4;
   display: flex;
   gap: 6px;
@@ -709,15 +700,8 @@ input[type="range"] {
     flex-wrap: wrap;
   }
 
-  .compare-control {
-    left: 12px;
-    right: 12px;
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
   .floating-reset {
-    bottom: 132px;
+    bottom: 18px;
   }
 
   .debug-overlay,

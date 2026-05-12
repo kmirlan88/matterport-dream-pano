@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw, Sparkles } from 'lucide-react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -50,6 +50,7 @@ export function SplatViewer({
   const panoSphereRef = useRef<THREE.Mesh | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const pointScaleRef = useRef(1);
+  const compareDragRef = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
   const [imageData, setImageData] = useState<Awaited<ReturnType<typeof loadAllImages>> | null>(null);
   const [cameraPosition, setCameraPosition] = useState('0.00, 0.00, 0.00');
@@ -332,6 +333,38 @@ export function SplatViewer({
 
   const pointCount = pointCloud?.count ?? 0;
   const depthMissing = imageData ? !imageData.depth.loaded : false;
+  const updateCompareFromPointer = useCallback((clientX: number) => {
+    const mount = mountRef.current;
+    if (!mount) return;
+    const rect = mount.getBoundingClientRect();
+    const nextCompare = Math.max(0.02, Math.min(0.98, (clientX - rect.left) / rect.width));
+    onModeChange('split');
+    onCompareChange(nextCompare);
+  }, [onCompareChange, onModeChange]);
+  const endCompareDrag = useCallback(() => {
+    compareDragRef.current = false;
+    if (controlsRef.current) controlsRef.current.enabled = true;
+  }, []);
+  const handleComparePointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    compareDragRef.current = true;
+    if (controlsRef.current) controlsRef.current.enabled = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateCompareFromPointer(event.clientX);
+  }, [updateCompareFromPointer]);
+  const handleComparePointerMove = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    if (!compareDragRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    updateCompareFromPointer(event.clientX);
+  }, [updateCompareFromPointer]);
+  const handleCompareKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    onModeChange('split');
+    onCompareChange(Math.max(0.02, Math.min(0.98, compare + (event.key === 'ArrowRight' ? 0.025 : -0.025))));
+  }, [compare, onCompareChange, onModeChange]);
 
   return (
     <section className="viewer-shell">
@@ -377,8 +410,22 @@ export function SplatViewer({
           </div>
         )}
         {mode === 'split' && (
-          <div className="compare-divider" style={{ left: `${compare * 100}%` }} aria-hidden="true">
-            <span />
+          <div className="compare-divider" style={{ left: `${compare * 100}%` }}>
+            <button
+              aria-label="Drag before after divider"
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={Math.round(compare * 100)}
+              className="compare-handle"
+              onKeyDown={handleCompareKeyDown}
+              onLostPointerCapture={endCompareDrag}
+              onPointerCancel={endCompareDrag}
+              onPointerDown={handleComparePointerDown}
+              onPointerMove={handleComparePointerMove}
+              onPointerUp={endCompareDrag}
+              role="slider"
+              type="button"
+            />
           </div>
         )}
         <div className="scanline" aria-hidden="true" />
@@ -390,23 +437,6 @@ export function SplatViewer({
         <span>depth loaded: {imageData?.depth.loaded ? 'yes' : 'no'}</span>
         <span>point count: {pointCount.toLocaleString()}</span>
         <span>camera position: {cameraPosition}</span>
-      </div>
-
-      <div className="compare-control">
-        <span>Original</span>
-        <input
-          aria-label="Before after split"
-          min="0"
-          max="1"
-          step="0.01"
-          type="range"
-          value={compare}
-          onChange={(event) => {
-            onModeChange('split');
-            onCompareChange(Number(event.target.value));
-          }}
-        />
-        <span>Transformed</span>
       </div>
 
       <button className="floating-reset" type="button" onClick={() => resetCamera(cameraRef.current, controlsRef.current, cameraView)}>
