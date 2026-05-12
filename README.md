@@ -2,6 +2,8 @@
 
 A local Vite + React + TypeScript demo that previews a Matterport-style 360 panorama with original, transformed, and before/after comparison modes.
 
+![Matterport Dream Pano preview](docs/assets/matterport-dream-pano-preview.png)
+
 ## Install and Run
 
 ### Requirements
