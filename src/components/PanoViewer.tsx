@@ -1,71 +1,56 @@
-import { type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, type PointerEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, Sparkles } from 'lucide-react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { AssetStatus, CameraView, RenderMode, Vibe, ViewerMode } from '../types';
-import { loadImageData, panoToPointCloud } from '../utils/panoToPointCloud';
+import type { AssetStatus, CameraView, ViewerMode } from '../types';
+import { loadImageData } from '../utils/panoImageLoader';
 
 type AssetExtension = 'jpg' | 'jpeg' | 'png';
 
 const ASSET_EXTENSIONS: AssetExtension[] = ['jpg', 'jpeg', 'png'];
 
-type SplatViewerProps = {
-  vibe: Vibe;
-  pointSize: number;
-  density: number;
+type PanoViewerProps = {
   compare: number;
   mode: ViewerMode;
-  renderMode: RenderMode;
   cameraView: CameraView;
   resetSignal: number;
-  explodeSignal: number;
   onModeChange: (mode: ViewerMode) => void;
   onCompareChange: (value: number) => void;
-  onRenderModeChange: (mode: RenderMode) => void;
   onCameraViewChange: (view: CameraView) => void;
   onAssetStatusChange: (status: AssetStatus) => void;
 };
 
-export function SplatViewer({
-  vibe,
-  pointSize,
-  density,
+export function PanoViewer({
   compare,
   mode,
-  renderMode,
   cameraView,
   resetSignal,
-  explodeSignal,
   onModeChange,
   onCompareChange,
-  onRenderModeChange,
   onCameraViewChange,
   onAssetStatusChange,
-}: SplatViewerProps) {
+}: PanoViewerProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
-  const pointsRef = useRef<THREE.Points | null>(null);
   const panoSphereRef = useRef<THREE.Mesh | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const pointScaleRef = useRef(1);
   const compareDragRef = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [imageData, setImageData] = useState<Awaited<ReturnType<typeof loadAllImages>> | null>(null);
+  const [imageData, setImageData] = useState<Awaited<ReturnType<typeof loadPanoImages>> | null>(null);
   const [cameraPosition, setCameraPosition] = useState('0.00, 0.00, 0.00');
 
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    loadAllImages().then((loaded) => {
+    loadPanoImages().then((loaded) => {
       if (cancelled) return;
       setImageData(loaded);
       setIsLoading(false);
       onAssetStatusChange({
         original: loaded.original.loaded,
         transformed: loaded.transformed.loaded,
-        depth: loaded.depth.loaded,
       });
     });
 
@@ -79,7 +64,6 @@ export function SplatViewer({
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x020812, 0.022);
     const camera = new THREE.PerspectiveCamera(72, mount.clientWidth / mount.clientHeight, 0.01, 120);
     camera.position.set(0, 0, 0.01);
 
@@ -110,14 +94,6 @@ export function SplatViewer({
     let lastCameraDebugUpdate = 0;
     const animate = () => {
       frame = window.requestAnimationFrame(animate);
-      const points = pointsRef.current;
-      if (points) {
-        if (pointScaleRef.current < 1) {
-          pointScaleRef.current = Math.min(1, pointScaleRef.current + 0.026);
-          points.scale.setScalar(easeOutCubic(pointScaleRef.current));
-        }
-        points.rotation.y += 0.00025;
-      }
       controls.update();
       const now = performance.now();
       if (now - lastCameraDebugUpdate > 280) {
@@ -134,8 +110,7 @@ export function SplatViewer({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
-      const panoSphere = panoSphereRef.current;
-      const material = panoSphere?.material;
+      const material = panoSphereRef.current?.material;
       if (material instanceof THREE.ShaderMaterial) {
         material.uniforms.uResolution.value.set(renderer.domElement.width, renderer.domElement.height);
       }
@@ -150,18 +125,12 @@ export function SplatViewer({
       renderer.dispose();
       mount.removeChild(renderer.domElement);
       scene.traverse((object) => {
-        if (object instanceof THREE.Points) {
+        if (object instanceof THREE.Mesh) {
           object.geometry.dispose();
-          const material = object.material;
-          if (Array.isArray(material)) material.forEach((item) => item.dispose());
-          else material.dispose();
-      } else if (object instanceof THREE.Mesh) {
-        object.geometry.dispose();
-        const material = object.material;
-        disposeMaterial(material);
-      }
-    });
-  };
+          disposeMaterial(object.material);
+        }
+      });
+    };
   }, []);
 
   useEffect(() => {
@@ -171,8 +140,7 @@ export function SplatViewer({
     if (panoSphereRef.current) {
       scene.remove(panoSphereRef.current);
       panoSphereRef.current.geometry.dispose();
-      const oldMaterial = panoSphereRef.current.material;
-      disposeMaterial(oldMaterial);
+      disposeMaterial(panoSphereRef.current.material);
       panoSphereRef.current = null;
     }
 
@@ -225,7 +193,7 @@ export function SplatViewer({
     scene.background = new THREE.Color(0x020812);
     scene.add(panoSphere);
     panoSphereRef.current = panoSphere;
-  }, [imageData]);
+  }, [compare, imageData, mode]);
 
   useEffect(() => {
     const material = panoSphereRef.current?.material;
@@ -234,105 +202,10 @@ export function SplatViewer({
     material.uniforms.uCompare.value = compare;
   }, [compare, mode]);
 
-  const pointCloud = useMemo(() => {
-    if (!imageData || renderMode !== 'splat') return null;
-    return panoToPointCloud({
-      original: imageData.original.data,
-      transformed: imageData.transformed.data,
-      depth: imageData.depth.loaded ? imageData.depth.data : null,
-      depthLoaded: imageData.depth.loaded,
-      density,
-      vibe,
-      mode,
-      compare,
-    });
-  }, [compare, density, imageData, mode, renderMode, vibe]);
-
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-
-    if (pointsRef.current) {
-      scene.remove(pointsRef.current);
-      pointsRef.current.geometry.dispose();
-      const oldMaterial = pointsRef.current.material;
-      if (Array.isArray(oldMaterial)) oldMaterial.forEach((material) => material.dispose());
-      else oldMaterial.dispose();
-      pointsRef.current = null;
-    }
-
-    if (!pointCloud || renderMode !== 'splat') return;
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(pointCloud.positions, 3));
-    geometry.setAttribute('customColor', new THREE.BufferAttribute(pointCloud.colors, 3));
-    geometry.computeBoundingSphere();
-
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        uSize: { value: pointSizeToShaderPixels(pointSize) },
-      },
-      vertexShader: `
-        attribute vec3 customColor;
-        varying vec3 vColor;
-        uniform float uSize;
-
-        void main() {
-          vColor = customColor;
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          float distanceToCamera = max(0.85, length(mvPosition.xyz));
-          gl_PointSize = uSize * (7.0 / distanceToCamera);
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        varying vec3 vColor;
-
-        void main() {
-          vec2 uv = gl_PointCoord - vec2(0.5);
-          float radius = length(uv);
-          if (radius > 0.5) discard;
-          float alpha = smoothstep(0.5, 0.18, radius) * 0.42;
-          vec3 color = vColor * (1.22 - radius * 0.18);
-          gl_FragColor = vec4(color, alpha);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      depthTest: true,
-    });
-
-    const points = new THREE.Points(geometry, material);
-    pointScaleRef.current = 1;
-    scene.add(points);
-    pointsRef.current = points;
-  }, [pointCloud, pointSize, renderMode]);
-
-  useEffect(() => {
-    const points = pointsRef.current;
-    if (!points) return;
-    const material = points.material;
-    if (Array.isArray(material)) return;
-    if (!(material instanceof THREE.ShaderMaterial)) return;
-    material.uniforms.uSize.value = pointSizeToShaderPixels(pointSize);
-  }, [pointSize]);
-
   useEffect(() => {
     resetCamera(cameraRef.current, controlsRef.current, cameraView);
   }, [cameraView, resetSignal]);
 
-  useEffect(() => {
-    if (renderMode !== 'splat') return;
-    const points = pointsRef.current;
-    if (!points) return;
-    pointScaleRef.current = 0.02;
-    points.scale.setScalar(0.02);
-    resetCamera(cameraRef.current, controlsRef.current, 'inside');
-    onCameraViewChange('inside');
-  }, [explodeSignal, onCameraViewChange, renderMode]);
-
-  const pointCount = pointCloud?.count ?? 0;
-  const depthMissing = imageData ? !imageData.depth.loaded : false;
   const updateCompareFromPointer = useCallback((clientX: number) => {
     const mount = mountRef.current;
     if (!mount) return;
@@ -370,20 +243,10 @@ export function SplatViewer({
     <section className="viewer-shell">
       <div className="viewer-toolbar">
         <div>
-          <span className="viewer-label">{renderMode === 'pano' ? 'Pano sphere preview' : 'Live splat viewport'}</span>
-          <strong>{renderMode === 'pano' ? 'Room-first preview mode' : `${pointCount.toLocaleString()} sampled points`}</strong>
+          <span className="viewer-label">Pano sphere preview</span>
+          <strong>Room-first panorama mode</strong>
         </div>
-        <div className="mode-toggle" aria-label="Viewer mode">
-          {(['pano', 'splat'] as RenderMode[]).map((item) => (
-            <button
-              className={renderMode === item ? 'active' : ''}
-              key={item}
-              type="button"
-              onClick={() => onRenderModeChange(item)}
-            >
-              {item === 'pano' ? 'Pano Sphere' : 'Splat'}
-            </button>
-          ))}
+        <div className="mode-toggle" aria-label="Panorama mode">
           {(['original', 'split', 'transformed'] as ViewerMode[]).map((item) => (
             <button
               className={mode === item ? 'active' : ''}
@@ -401,12 +264,7 @@ export function SplatViewer({
         {isLoading && (
           <div className="loading-state">
             <Sparkles size={22} />
-            Building fake splat world...
-          </div>
-        )}
-        {depthMissing && (
-          <div className="depth-warning" role="status">
-            Depth map missing — using preview sphere mode.
+            Loading panorama...
           </div>
         )}
         {mode === 'split' && (
@@ -434,8 +292,6 @@ export function SplatViewer({
       <div className="debug-overlay" aria-label="Viewer debug overlay">
         <span>pano loaded: {imageData?.original.loaded ? 'yes' : 'no'}</span>
         <span>transformed loaded: {imageData?.transformed.loaded ? 'yes' : 'no'}</span>
-        <span>depth loaded: {imageData?.depth.loaded ? 'yes' : 'no'}</span>
-        <span>point count: {pointCount.toLocaleString()}</span>
         <span>camera position: {cameraPosition}</span>
       </div>
 
@@ -459,15 +315,13 @@ export function SplatViewer({
   );
 }
 
-async function loadAllImages() {
+async function loadPanoImages() {
   const original = await loadImageData(await findAssetUrl('pano-original'), 'original');
-  const [transformedAsset, depthAsset] = await Promise.all([
-    findAssetUrl('pano-transformed', ['png', 'jpg', 'jpeg']).then((url) => loadImageData(url, 'transformed')),
-    findAssetUrl('depth-map').then((url) => loadImageData(url, 'depth')),
-  ]);
+  const transformedAsset = await findAssetUrl('pano-transformed', ['png', 'jpg', 'jpeg'])
+    .then((url) => loadImageData(url, 'transformed'));
   const transformed = transformedAsset.loaded ? transformedAsset : { data: original.data, loaded: false };
 
-  return { original, transformed, depth: depthAsset };
+  return { original, transformed };
 }
 
 function resetCamera(
@@ -514,10 +368,6 @@ async function findAssetUrl(baseName: string, extensions: AssetExtension[] = ASS
   return undefined;
 }
 
-function pointSizeToShaderPixels(pointSize: number) {
-  return pointSize * 2.9;
-}
-
 function disposeMaterial(material: THREE.Material | THREE.Material[]) {
   if (Array.isArray(material)) {
     material.forEach(disposeMaterial);
@@ -555,8 +405,4 @@ function imageDataToTexture(imageData: ImageData) {
 
 function formatVector(vector: THREE.Vector3) {
   return `${vector.x.toFixed(2)}, ${vector.y.toFixed(2)}, ${vector.z.toFixed(2)}`;
-}
-
-function easeOutCubic(value: number) {
-  return 1 - Math.pow(1 - value, 3);
 }
